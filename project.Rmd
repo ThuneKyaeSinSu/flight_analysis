@@ -1,0 +1,405 @@
+---
+title: "Flight Price Analysis and Prediction"
+author: "Thune Kyae Sin Su - B00868806, Yuki Law - B00865885"
+group: "Hangry and Angry"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(ggpointdensity)
+library(DMwR2)
+library(rpart.plot)
+library(rpart)
+library(e1071)
+```
+
+## Introduction
+
+The dynamics of flight pricing is a subject that interests and affects travelers around the globe. According to ICAO's statistics, the total number of passengers carried on scheduled services rose to 4.5 billion in 2019, which is 3.6 per cent increase from the previous year, while the number of departures reached 38.3 million in 2019, a 1.7 per cent increase [3]. The upward trend for air travel is expected to continue for each passing year which is why it is important for people to understand what factors are behind these flight prices. Understanding these factors could save them some money as they go to off to see their families or go on a well deserved break. In this report, we will be tackling the questions below:
+
+1.  Does departure time affect the price of the air ticket? Which time has the cheapest and most expensive flight ticket?
+
+2.  Does the duration of the flight affect the price of the air ticket?
+
+3.  Will the price of the flights be affected by the days left?
+
+## Data
+
+The data we used to investigate our questions is extracted from Clean_Dataset.csv in the Flight Price Prediction datasets from Kaggle. The dataset was sourced from <https://www.kaggle.com/datasets/shubhambathwal/flight-price-prediction/data>. The dataset is prepared and complied by Shubham Bathwa. The data in the dataset is collected from “Ease My Trip” website. Both data for economy class flight tickets and business class flight tickets that traveled between India's top 6 metro cities are extracted from the website. The data was collected over a period of 50 days.
+
+The dataset contains 300,153 entries, each representing a flight ticket from the “Ease My Trip” website. The dataset consists of 12 columns and each columns contains a flight information from the flight ticket. The information represented in the columns are airline company, flight code, source city, departure time, number of stops, arrival time, destination city, ticket class, flight duration, days left to the day of the flight, and price of the ticket. The dataset contains information on 6 unique airlines, 1,561 unique planes, 6 unique departure cities, 6 unique departure times, 6 unique arrival times, 6 unique destination cities, and 2 unique types of classes.
+
+## Data Cleaning and Pre-processing
+
+The first column of the dataset represents the row numbers for each entry. As this information is not needed, the column containing the row numbers is removed. Several columns in the dataset, such as airline, flight, source city, departure time, stops, arrival time, destination city, and class, are of character type. These columns are factorized for easier data manipulation and analysis. The cleaned dataset now contains 11 columns, where 8 columns are the "factor" data type, and 3 are the double data type.
+
+```{r}
+# Loading the data
+data <- read_csv("archive/Clean_Dataset.csv")
+
+# Remove unnecessary column and factorized columns
+df <- data %>% select(-1) %>%
+  mutate(across(c(airline, flight, source_city, departure_time, stops, arrival_time, destination_city, class), as.factor))
+
+# Structure of dataset
+str(df)
+
+# Print the dataset
+df
+```
+
+## Exploratory Data Analysis
+
+```{r}
+# Summary of the dataset
+summary(df)
+```
+
+## Visualizations & Interpretation
+
+Question 1:
+
+The boxplot shows that the medium of each departure time is relatively similar, ranging between 6,500 and 8,200 Rupees. Late-night departure time has a slightly lower medium than other departure times, which is 4499 Rupee. However, it is difficult to determine which departure time has the highest median based solely on the boxplot. Furthermore, the boxplot also illustrates that late-night departure time has the smallest interquartile range in price. In contrast, night departure time has the largest interquartile range in price, indicating greater price variability in flight tickets.
+
+```{r}
+# Boxplot for flight prices by departure time
+ggplot(df, aes(x = departure_time, y = price)) +
+  geom_boxplot() +
+  labs(title = "Flight Prices by Departure Time", x = "Departure Time", y = "Price") +
+  theme_minimal()
+```
+
+After further analysis by calculating the mean price of the flight tickets, the late night departure time still has the cheapest flight tickets compared to other departure times, which is 9295.299 Rupee. On the other hand, night departure time has the most expensive flight tickets compared to the departure times, standing at the mean of 23062.147 Rupee.
+
+```{r}
+# Calculate the mean price by departure time
+df_departure <- df %>%
+  group_by(departure_time) %>%
+  summarize(mean_price = mean(price))
+
+# Display the mean flight ticket price in a table
+kable(df_departure, caption = "Mean Price by Departure Time")
+```
+
+The histogram for night departure time prices demonstrates that the data is right-skewed, with more records of flight ticket prices on the lower end of the price range. However, the long tail of the histogram does extend to higher prices. The histogram also has a smaller peak, around 30,000 to 70,000 Rupees. This indicates that flight tickets with night departure times are typically in the price range of the two peaks.
+
+```{r}
+# Get the entries for flights with Night departure times
+df_night <- df %>% filter(departure_time == "Night")
+
+# Plot histogram to investigate the distribution of the Night departure times flight price
+ggplot(df_night, aes(x = price)) +
+  geom_histogram(bins = 30, fill = "lightblue", color = "black") +
+  labs(title = "Histogram of Night Flight Prices", x = "Price", y = "Frequency") +
+  theme_minimal()
+```
+
+The histogram for late-night flight ticket prices illustrates that the data are heavily concentrated on the lower end. There are only a few isolated outliers where flight prices exceed 20,000 Rupees. The histogram also indicates that the frequency of late-night flight tickets was drastically lower than the night departure times of flight tickets.
+
+```{r}
+# Get the entries for flights with Late Night departure times
+df_late <- df %>% filter(departure_time == "Late_Night")
+
+# Plot histogram to investigate the distribution of the Late Night departure times flight price
+ggplot(df_late, aes(x = price)) +
+  geom_histogram(bins =30, fill = "lightblue", color = "black") +
+  labs(title = "Histogram of Late Night Flight Prices", x = "Price", y = "Frequency") +
+  theme_minimal()
+```
+
+Question 2:
+
+The scatterplot reveals that there are two different clusters present in the graph. Many of the points are concentrated on the lower left of the graph, which indicates that many of the flight tickets are lower in price and the flights have shorter duration. The positively sloped trendline also demonstrates that the duration of the flights and the price of flight tickets are positively correlated, where the longer the flight duration, the higher the price of the flight tickets.
+
+```{r}
+# Plot scatter and density plot to investigate the relationship between duration and the prices of the flight 
+ggplot(df, aes(x=duration, y=price)) + 
+  geom_pointdensity(size = 0.5, alpha=0.05) + 
+  scale_color_viridis_c() +
+  geom_smooth(method = "lm", formula = y ~ x, color = "red") +
+  labs(title = "Duration vs Price")
+```
+
+To further examine the relationship between the two clusters in the scatterplot, we coloured the points based on the class of the flight tickets. After applying the colour differentiation, the scatterplot shows that the two clusters belong to the two ticket classes. Pink cluster for business class flight tickets and blue cluster for economy flight tickets. Business flight tickets are generally more expensive than economy flight tickets. Thus, the cluster belonging to business flight tickets is slightly higher in the graph than economy flight tickets. The different ticket classes also explain the extensive range of prices for the same flight duration.
+
+```{r}
+# Scatterplot to show the class of the flight tickets
+ggplot(df, aes(x = duration, y = price, color = class)) +
+  geom_point(size = 0.2, alpha = 0.3) +
+  geom_smooth(method = "lm", formula = y ~ x, color = "red") +
+  labs(title = "Duration vs Price", x = "Duration", y = "Price", color = "Class") +
+  theme_minimal()
+```
+
+The scatter-density plot for business-class flight tickets reveals two main clusters of points. These clusters are centered around 25,000 and 60,000 Rupees. Both clusters fall within the duration range of 0 to 20 hours. The trend line in the graph highlights a positive relationship between flight duration and ticket price, where longer flights generally have higher prices for business-class tickets.
+
+```{r}
+# Get the entries for business-class flight tickets
+df_business <- df %>% filter(class == "Business")
+
+# Plot hexagonal heatmap to investigate the relationship between duration and the prices of Business class flights
+ggplot(df_business, aes(x = duration, y = price)) + 
+  geom_pointdensity(size = 0.5, alpha = 0.5) + 
+  scale_color_viridis_c() +
+  geom_smooth(method = "lm", formula = y ~ x, color = "red") +
+  labs(title = "Business Class's Duration vs Price", x = "Duration", y = "Price") +
+  theme_minimal()
+```
+
+Similar to the scatter-density plot for business-class flight tickets, the graph has two main clusters for economy-class flight tickets. One cluster is located around the price level of 2500 Rupees, and the second cluster is around 50,000 Rupees. Most flights have durations shorter than 20 hours, as indicated by the higher density of points within this range. The trend line, similar to the previous graph, has a positive relationship between flight duration and ticket price.
+
+```{r}
+# Get the entries for economy-class flight tickets
+df_economy <- df %>% filter(class == "Economy")
+
+# Plot hexagonal heatmap to investigate the relationship between duration and the prices of Economy class flights
+ggplot(df_economy, aes(x = duration, y = price)) + 
+  geom_pointdensity(size = 0.5, alpha = 0.5) + 
+  scale_color_viridis_c() +
+  geom_smooth(method = "lm", formula = y ~ x, color = "red") +
+  labs(title = "Economy Class's Duration vs Price", x = "Duration", y = "Price") +
+  theme_minimal()
+```
+
+Question 3:
+
+Below, we created a scatter plot to see if there is a correlation between the days left from departure date and the price of the flight ticket. Further more, we also categorized the plot by the source and destination cities since we did not have individual flight numbers to track.
+
+```{r}
+library(ggplot2)
+
+# Adding a new column "source_dest" which is a combination of 
+# source and destination city
+combined_cities <- df %>% unite(source_dest, source_city, destination_city, sep = "_", remove = FALSE)
+
+# Define the plotting function
+plot_for_category <- function(cat, data) {
+  subset_data <- subset(data, source_dest == cat)
+  
+  ggplot(subset_data, aes(x = days_left, y = price)) +
+    geom_point(color = "blue") +
+    geom_smooth(method = "lm", color = "red") +
+    labs(
+      title = paste("Plot for Category:", cat),
+      x = "Days before Departure",
+      y = "Price (Rupees)"
+    ) +
+    theme_minimal()
+}
+
+# Get unique categories
+unique_categories <- unique(combined_cities$source_dest)
+
+# Generate and store plots for each category
+plots <- lapply(unique_categories, function(cat) plot_for_category(cat, combined_cities))
+
+# Display all plots 
+for (plot in plots) {
+  plot + ylim(0, 100000)
+  print(plot)
+}
+```
+
+## Machine Learning Models
+
+First, we will be splitting the dataset into the training and testing set to build our machine learning models. The training set will have 70 percent of the dataset and the testing set will have 30 percent of the dataset. We also chose to create a sample training data of 10000 rows, as it was taking our computers too long to compute the models using the larger dataset.
+
+```{r}
+set.seed(123)
+smp_size <- floor(0.7 * nrow(df))
+row_index <- sample(1: nrow(df), size = smp_size)
+train_smp <- df[row_index, ]
+test_smp <- df[-row_index, ]
+sample_data <- train_smp[sample(nrow(train_smp), 10000), ]
+```
+
+### Tree-Based Models
+
+The first model we are using to predict the flight prices is the tree-based model. In the model, we used categorical variable such as departure time of the flight and continuous variables such as duration of the flights and days left till the day of the flight. However, this model did not do well in predicting the prices as the mean absolute error is high and correlation is weak.
+
+```{r}
+# Tree-Based Models
+ar <- rpart(price ~ departure_time + duration + days_left, 
+            train_smp)
+preds <- predict(ar, test_smp)
+
+# Calculate Mean Absolute Error (MAE)
+mae <- mean(abs(preds - test_smp$price))
+mae
+
+# Calculate correlation coefficient
+cr <- cor(preds,test_smp$price)
+cr
+
+# Get the optimal cp value
+optimal_cp <- ar$cptable[which.min(ar$cptable[,"xerror"]), "CP"]
+
+# Prune the tree
+pruned_tree <- prune(ar, cp = optimal_cp)
+
+# Visualize the tree
+rpart.plot(pruned_tree, box.palette = "Blues", main = "Simplified Decision Tree")
+```
+
+To make the model more accurate, we trained the tree-based model with more independent variables. After retraining the model, the model now produce predictions with extremely strong correlation and lower mean absolute error compare to the last model.
+
+```{r}
+# Train model with more variables
+ar2 <- rpart(price ~ departure_time + duration + days_left + stops + source_city + airline + class + destination_city,
+            train_smp)
+preds <- predict(ar2, test_smp)
+
+# Calculate Mean Absolute Error (MAE)
+mae <- mean(abs(preds - test_smp$price))
+mae
+
+# Calculate correlation coefficient
+cr <- cor(preds,test_smp$price)
+cr
+```
+
+The plot shows that the flight class is the main predictor of the flight ticket's price. The duration of the flight further influences the price of the business class flight.
+
+```{r}
+# Get the optimal cp value
+optimal_cp2 <- ar2$cptable[which.min(ar2$cptable[,"xerror"]), "CP"]
+
+# Prune the tree
+pruned_tree2 <- prune(ar2, cp = optimal_cp2)
+
+# Visualize the tree
+rpart.plot(pruned_tree2, box.palette = "Blues", main = "Simplified Decision Tree")
+```
+
+## Linear Models
+
+The next model we will be using to predict flight prices will be a linear model.
+
+```{r}
+# Remove Flight column from data frame
+sample_data <- subset(sample_data, select = -c(flight))
+
+#Get formula for LM
+dependent_vars <- setdiff(names(sample_data), "price")
+formula <- as.formula(paste("price ~", paste(dependent_vars, collapse = " + ")))
+
+# Build the linear model
+linear_model <- lm(formula, data = sample_data)
+```
+
+```{r}
+# Get predictions and MAE
+lm_preds <- predict(linear_model, test_smp)
+lm_mae <- mean(abs(lm_preds - test_smp$price))
+lm_mae
+
+# Calculate correlation coefficient
+lm_cr <- cor(lm_preds,test_smp$price)
+lm_cr
+```
+
+## Support Vector Machine
+
+Support vector machine is one of the model we are using to predict the price of the plane tickets. Independent variables such as departure time of the flight, duration of the flight, days left to the flight, number of stops, source city, airline, class, and destination_city are used to predict the price of the flight tickets. Three different kernel were used to find the suitable model. The radial SVM model performed the best in predicting the flight prices as the model has the smallest mean absolute error and highest correlation coefficient.
+
+```{r}
+# linear svm model
+s <- svm(price ~ departure_time + duration + days_left + stops + source_city + airline + class + destination_city, 
+         sample_data, 
+         kernel="linear")
+s_preds <- predict(s, test_smp)
+mae_s <- mean(abs(s_preds - test_smp$price))
+mae_s
+cr_s <- cor(s_preds,test_smp$price)
+cr_s
+
+# radial svm model
+r <- svm(price ~ departure_time + duration + days_left + stops + source_city + airline + class + destination_city, 
+         sample_data, 
+         kernel="radial")
+r_preds <- predict(r, test_smp)
+mae_r <- mean(abs(r_preds - test_smp$price))
+mae_r
+cr_r <- cor(r_preds,test_smp$price)
+cr_r
+
+# poly svm model
+poly <- svm(price ~ departure_time + duration + days_left + stops + source_city + airline + class + destination_city, 
+            sample_data, 
+            kernel="polynomial")
+poly_preds <- predict(poly, test_smp)
+mae_p <- mean(abs(poly_preds - test_smp$price))
+mae_p
+cr_p <- cor(poly_preds,test_smp$price)
+cr_p
+```
+
+After tuning the radial SVM model, the model became more accurate as the mean absolute error decreased and the correlation coefficient increased. The best parameters for gamma and cost are 0.1 and 10, respectively. A smaller random subset of 5000 entries was used to train the fine-tuned model for efficiency.
+
+```{r}
+# Take a smaller sample
+sample_data2 <- train_smp[sample(nrow(train_smp), 5000), ]
+
+# Find the best parameters
+p <- tune.svm(price ~ departure_time + duration + days_left + stops + source_city + airline + class + destination_city, 
+              data = sample_data2, 
+              gamma=c(0.01, 0.1, 1), 
+              cost=c(1, 5, 10) , 
+              kernel = "radial") 
+
+# Train the model with the best parameters
+new_r <- svm(price ~ departure_time + duration + days_left + stops + source_city + airline + class + destination_city, 
+             sample_data, 
+             kernel="radial", 
+             gamma=p$best.parameters$gamma, 
+             cost=p$best.parameters$cost)
+new_r_preds <- predict(new_r, test_smp)
+
+# Calculate Mean Absolute Error (MAE)
+new_mae_r <- mean(abs(new_r_preds - test_smp$price))
+new_mae_r
+
+# Calculate correlation coefficient
+new_cr_r <- cor(new_r_preds,test_smp$price)
+new_cr_r
+```
+
+## Conclusion
+
+For this project we sought out to see if there are factors influencing the flight prices. For our first question, we ask if there was a correlation between the time of departure and the price of the tickets. From a number of visualizations that we did, we can see that there is definitely a correlation as late night tickets are usually the cheapest with very little variability in price with a mean price of 9295.3 Rupees. For the remaining departure times, we can see that there is not much difference in prices as the means of the rest of the departure times center around 21000 Rupees.
+
+For our second question, we tried to see if there was a correlation between the duration of the flight and the ticket of the price. From just looking a the trend line from the scatter plot, we can see a positive correlation between the duration and the price of the ticket. Upon further inspection of the scatter plot, after differentiating the classes of the tickets, we can see the business class tickets get even more expensive with duration than economy tickets.
+
+For our last question, we wanted to see if there was a relation between the days left from departure and the price of the ticket. We used a scatter plot categorized by source and destination city and for every plot we can see that there is a negative correlation between the price and the days left from departure, the further the departure date is the cheaper the tickets.
+
+For our first tree model, we used only 3 indepandent variables (departure time, duration, days_left) with our target variable, price, to train our model. This did not lead to optimal results as we got a mean absolute error of 18879.4 and a correlation coefficient of 0.2592. So for our second tree model, we used all the variables in the data set to train the model and we received better results with a mean absolute error of 4315.176 and a correlation coefficient of 0.957.
+
+For our linear model, we used all the variables in the data set to train the model and a mean absolute error of 4560.298 and a correlation coefficient of 0.954.
+
+For our SVMs, first we trained 1 linear SVM, 1 radial SVM and 1 polynomial SVM using all the variables from the dataset. The table below shows the mean absolute value and the correlation coefficient for each of these models.
+
+```         
+                Mean absolute value         Correlation coefficient 
+Linear SVM       4183.375                         0.9514206                        
+Radial SVM       3139.727                         0.9731739                       
+Polynomial SVM   7739.832                         0.91568           
+```
+
+We decided to tune the Radial SVM to make it more accurate by using the best gamma and cost values. After tuning the models, the MAE decreased to 2851.704 and the correlation coefficient rose to 0.9783.
+
+After evaluating all our models, we can see that Radial SVM has the best performance overall even before the tuning with a MAE of 3139.727 and a correlation coefficient of 0.973.
+
+From this project, we can conclude that there are definitely factors such as departure time, duration and the days left from departure affecting the price of flight tickets.
+
+Citations
+
+[1] jan-glx, “Scatterplot with too many points,” Stack Overflow, Oct. 10, 2011. <https://stackoverflow.com/questions/7714677/scatterplot-with-too-many-points/58523956#58523956>
+
+[2] “How to Prune a Tree in R?,” GeeksforGeeks, Jun. 13, 2024. <https://www.geeksforgeeks.org/how-to-prune-a-tree-in-r/>
+
+[3] <https://www.icao.int/annual-report-2019/Pages/the-world-of-air-transport-in-2019.aspx#>:\~:text=The%204.5%20billion%20scheduled%20passengers,some%2090%20million%20in%202040.&text=The%20world's%20major%20manufacturers%20delivered,822%20new%20aircraft%20net%20orders.
